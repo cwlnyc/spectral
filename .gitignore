@@ -1,0 +1,23 @@
+# Virtual environment
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Output files
+*_amazon.txt
+test_upload.txt
+test_single_product.csv
+
+# Excel temp files
+~$*.xlsx
+~$*.xlsm
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
