@@ -158,6 +158,10 @@ def map_to_amazon(shopify_product, column_names):
     main_image = shopify_product.get('Variant Image', '') or shopify_product.get('Image Src', '')
 
     # Map to Amazon columns
+    # Error/Suggestion counts (Amazon fills these, but we set defaults)
+    amazon_row['Number of attributes with errors'] = '0'
+    amazon_row['Number of attributes with other suggestions'] = '0'
+
     # Listing Identity
     amazon_row['SKU'] = shopify_product.get('Variant SKU', '')
     amazon_row['Listing Action'] = 'Create or Replace (Full Update)'
@@ -168,7 +172,8 @@ def map_to_amazon(shopify_product, column_names):
     amazon_row['Brand Name'] = 'Spectral Paints'
     amazon_row['Product Id Type'] = 'UPC' if upc else 'GTIN Exempt'
     amazon_row['Product Id'] = upc
-    amazon_row['Item Type Keyword'] = 'paint'
+    # Use the full browse path for automotive paint products
+    amazon_row['Item Type Keyword'] = 'Automotive > Paint & Paint Supplies > Paints & Primers > Clear Coats (automotive-clear-coat-paints)'
     amazon_row['Manufacturer'] = 'Spectral Paints'
 
     # Offer
@@ -178,26 +183,42 @@ def map_to_amazon(shopify_product, column_names):
     # Offer (US)
     amazon_row['Fulfillment Channel Code (US)'] = 'DEFAULT'
     amazon_row['Quantity (US)'] = shopify_product.get('Variant Inventory Qty', '')
-    amazon_row['Your Price USD (Sell on Amazon, US)'] = shopify_product.get('Variant Price', '')
+    amazon_row['Merchant Shipping Group (US)'] = 'Migrated Template'
 
     # Product Details
     amazon_row['Product Description'] = description[:2000]
     amazon_row['Number of Items'] = '1'
-    amazon_row['Color'] = color
+    amazon_row['Color'] = color if color else 'Clear'
+    amazon_row['Color Code'] = color if color else 'Clear'
     amazon_row['Size'] = size
-    amazon_row['Paint Type'] = paint_type
-    amazon_row['Finish Type'] = finish
+    amazon_row['Part Number'] = shopify_product.get('Variant SKU', '')
+    amazon_row['Surface Recommendation'] = 'Metal'
+    amazon_row['Coverage'] = '0'
+    amazon_row['Paint Type'] = paint_type if paint_type else 'Spray'
+    amazon_row['Finish Type'] = finish if finish else 'Metallic'
+    amazon_row['Item Form'] = 'Aerosol'
+    amazon_row['Unit Count'] = '1'
+    amazon_row['Unit Count Type'] = 'Fl Oz'
+    amazon_row['Specific Uses for Product'] = 'Exterior'
 
-    # Handle duplicate column names - Bullet Points are at indices 74-78 (cols 75-79)
-    # We need to set them by position since there are multiple "Bullet Point" columns
+    # Volume - derive from size
+    if 'quart' in size.lower():
+        amazon_row['Item Volume'] = '1'
+        amazon_row['Item Volume Unit'] = 'Quarts'
+    elif 'gallon' in size.lower():
+        amazon_row['Item Volume'] = '1'
+        amazon_row['Item Volume Unit'] = 'Gallons'
+    elif 'pint' in size.lower():
+        amazon_row['Item Volume'] = '1'
+        amazon_row['Item Volume Unit'] = 'Pints'
 
     # Safety & Compliance
     amazon_row['Country of Origin'] = 'United States'
     amazon_row['Are batteries required?'] = 'No'
     amazon_row['Are batteries included?'] = 'No'
 
-    # Dangerous Goods - handle duplicate column names
-    amazon_row['Dangerous Goods Regulations'] = 'GHS'
+    # Safety Data Sheet URL
+    amazon_row['Safety Data Sheet (SDS or MSDS) URL'] = 'spectralpaints.biz'
 
     # Images
     amazon_row['Main Image URL'] = main_image
@@ -208,47 +229,69 @@ def map_to_amazon(shopify_product, column_names):
 def write_amazon_txt(products, bullets_list, output_path, template_headers):
     """Write products to Amazon tab-delimited format with proper headers."""
 
+    settings = template_headers['settings']
     instructions = template_headers['instructions']
     categories = template_headers['categories']
     columns = template_headers['columns']
+    attributes = template_headers['attributes']
+    example_row = template_headers.get('example_row', [])
     num_cols = len(columns)
 
     # Ensure all header rows have exactly num_cols columns
+    while len(settings) < num_cols:
+        settings.append('')
     while len(instructions) < num_cols:
         instructions.append('')
     while len(categories) < num_cols:
         categories.append('')
+    while len(attributes) < num_cols:
+        attributes.append('')
+    while len(example_row) < num_cols:
+        example_row.append('')
 
-    with open(output_path, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.writer(f, delimiter='\t')
+    with open(output_path, 'w', encoding='cp1252', newline='') as f:
+        # Write header rows directly (they already have proper quoting from template)
+        # Use CRLF line endings to match Amazon template
+        f.write('\t'.join(settings[:num_cols]) + '\r\n')
+        f.write('\t'.join(instructions[:num_cols]) + '\r\n')
+        f.write('\t'.join(categories[:num_cols]) + '\r\n')
+        f.write('\t'.join(columns[:num_cols]) + '\r\n')
+        f.write('\t'.join(attributes[:num_cols]) + '\r\n')
 
-        # Row 1: Instructions
-        writer.writerow(instructions[:num_cols])
+        # Write example row (ABC123) - required by Amazon template
+        f.write('\t'.join(example_row[:num_cols]) + '\r\n')
 
-        # Row 2: Category headers
-        writer.writerow(categories[:num_cols])
-
-        # Row 3: Column names
-        writer.writerow(columns)
+        # Use csv writer for data rows (also needs CRLF)
+        writer = csv.writer(f, delimiter='\t', lineterminator='\r\n')
 
         # Data rows
         for product, bullets in zip(products, bullets_list):
             row = []
             bullet_idx = 0
             ghs_idx = 0
+            dg_idx = 0  # Dangerous Goods Regulations index
 
             for i, col_name in enumerate(columns):
                 if col_name == 'Bullet Point':
-                    # Handle multiple Bullet Point columns (indices 74-78)
+                    # Handle multiple Bullet Point columns
                     if bullet_idx < len(bullets):
                         row.append(bullets[bullet_idx][:500] if bullets[bullet_idx] else '')
                     else:
                         row.append('')
                     bullet_idx += 1
+                elif col_name == 'Dangerous Goods Regulations':
+                    # Handle multiple Dangerous Goods columns: Other, GHS, GHS, GHS, GHS
+                    if dg_idx == 0:
+                        row.append('Other')
+                    elif dg_idx <= 4:
+                        row.append('GHS')
+                    else:
+                        row.append('')
+                    dg_idx += 1
                 elif col_name == 'GHS Class':
                     # Handle multiple GHS Class columns
                     if ghs_idx == 0:
-                        row.append('Flammable')
+                        row.append('Amazon Specific No Label With Warning')
                     elif ghs_idx == 1:
                         row.append('Irritant')
                     else:
@@ -306,7 +349,7 @@ def main():
     count = write_amazon_txt(amazon_products, bullets_list, output_path, template_headers)
 
     print(f"Done! Wrote {count} products to {output_path}")
-    print(f"File includes 3 header rows + {count} data rows")
+    print(f"File includes 6 header rows (5 headers + 1 example) + {count} data rows")
     return 0
 
 
