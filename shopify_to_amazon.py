@@ -178,11 +178,14 @@ def map_to_amazon(shopify_product, column_names):
 
     # Offer
     amazon_row['Item Condition'] = 'New'
-    amazon_row['List Price'] = shopify_product.get('Variant Price', '')
+    price = shopify_product.get('Variant Price', '')
+    amazon_row['List Price'] = price
+    amazon_row['Your Price USD (Sell on Amazon, US)'] = price  # This is the actual selling price
 
     # Offer (US)
     amazon_row['Fulfillment Channel Code (US)'] = 'DEFAULT'
-    amazon_row['Quantity (US)'] = shopify_product.get('Variant Inventory Qty', '')
+    amazon_row['Quantity (US)'] = '30'  # Fixed inventory count
+    amazon_row['Handling Time (US)'] = '2'  # 2 business days
     amazon_row['Merchant Shipping Group (US)'] = 'Migrated Template'
 
     # Product Details
@@ -196,21 +199,33 @@ def map_to_amazon(shopify_product, column_names):
     amazon_row['Coverage'] = '0'
     amazon_row['Paint Type'] = paint_type if paint_type else 'Spray'
     amazon_row['Finish Type'] = finish if finish else 'Metallic'
-    amazon_row['Item Form'] = 'Aerosol'
-    amazon_row['Unit Count'] = '1'
-    amazon_row['Unit Count Type'] = 'Fl Oz'
+    amazon_row['Item Form'] = 'Liquid'
     amazon_row['Specific Uses for Product'] = 'Exterior'
 
-    # Volume - derive from size
-    if 'quart' in size.lower():
-        amazon_row['Item Volume'] = '1'
-        amazon_row['Item Volume Unit'] = 'Quarts'
-    elif 'gallon' in size.lower():
+    # Volume, Size, and Unit Count - derive from size, title, or description
+    size_text = f"{size} {title} {description}".lower()
+    if 'gallon' in size_text:
         amazon_row['Item Volume'] = '1'
         amazon_row['Item Volume Unit'] = 'Gallons'
-    elif 'pint' in size.lower():
+        amazon_row['Size'] = '1 Gallon'
+        amazon_row['Unit Count'] = '128'
+        amazon_row['Unit Count Type'] = 'Fl Oz'
+    elif 'quart' in size_text:
+        amazon_row['Item Volume'] = '1'
+        amazon_row['Item Volume Unit'] = 'Quarts'
+        amazon_row['Size'] = '1 Quart'
+        amazon_row['Unit Count'] = '32'
+        amazon_row['Unit Count Type'] = 'Fl Oz'
+    elif 'pint' in size_text:
         amazon_row['Item Volume'] = '1'
         amazon_row['Item Volume Unit'] = 'Pints'
+        amazon_row['Size'] = '1 Pint'
+        amazon_row['Unit Count'] = '16'
+        amazon_row['Unit Count Type'] = 'Fl Oz'
+    else:
+        # Default for unknown sizes
+        amazon_row['Unit Count'] = '1'
+        amazon_row['Unit Count Type'] = 'Count'
 
     # Safety & Compliance
     amazon_row['Country of Origin'] = 'United States'
@@ -258,8 +273,7 @@ def write_amazon_txt(products, bullets_list, output_path, template_headers):
         f.write('\t'.join(columns[:num_cols]) + '\r\n')
         f.write('\t'.join(attributes[:num_cols]) + '\r\n')
 
-        # Write example row (ABC123) - required by Amazon template
-        f.write('\t'.join(example_row[:num_cols]) + '\r\n')
+        # Skip example row (ABC123) - not needed for upload
 
         # Use csv writer for data rows (also needs CRLF)
         writer = csv.writer(f, delimiter='\t', lineterminator='\r\n')
@@ -349,7 +363,7 @@ def main():
     count = write_amazon_txt(amazon_products, bullets_list, output_path, template_headers)
 
     print(f"Done! Wrote {count} products to {output_path}")
-    print(f"File includes 6 header rows (5 headers + 1 example) + {count} data rows")
+    print(f"File includes 5 header rows + {count} data rows")
     return 0
 
 
